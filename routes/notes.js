@@ -58,7 +58,7 @@ router.get('/:id', (req, res, next) => {
     .where('notes.id', noteId)
     .then(results => {
       if (results) {
-        const hydrated = hydrateNotes(results);
+        const hydrated = hydrateNotes(results)[0];
         res.json(hydrated);
       } else {
         next();
@@ -71,7 +71,7 @@ router.get('/:id', (req, res, next) => {
 
 /* ========== POST/CREATE ITEM ========== */
 router.post('/', (req, res, next) => {
-  const { title, content, folderId } = req.body;
+  const { title, content, folderId, tags } = req.body;
 
   /***** Never trust users. Validate input *****/
   if (!title) {
@@ -83,33 +83,48 @@ router.post('/', (req, res, next) => {
   const newItem = {
     title: title,
     content: content,
-    folder_id: (folderId) ? folderId : null
+    folder_id: (folderId) ? folderId : null, 
   };
 
+  //Add tags to create endpoint
+  let noteId;
   // Insert new note, instead of returning all the fields, just return the new `id`
   knex.insert(newItem)
     .into('notes')
     .returning('id')
     .then(([id]) => {
-      // Using the new id, select the new note and the folder
-      return knex.select('notes.id', 'title', 'content', 'folder_id as folderId', 'folders.name as folderName')
+      //Insert related tags into notes_tags table
+      noteId = id;
+      const tagsInsert = tags.map(tagID => ({ note_id: noteId, tag_id: tagID}));
+      return knex.insert(tagsInsert).into('notes_tags');
+    })
+    .then(() => {
+      //Select the new note and leftJoin on folders and tags
+      return knex.select('notes.id', 'title', 'content', 'folder_id as folderId', 'folders.name as folderName', 'tags.id as tagId', 'tags.name as tagNmae')
         .from('notes')
         .leftJoin('folders', 'notes.folder_id', 'folders.id')
-        .where('notes.id', id);
+        .leftJoin('notes_tags', 'notes.id', 'notes_tags.note_id')
+        .leftJoin('tags', 'tags.id', 'notes_tags.tag_id')
+        .where('notes.id', noteId);
     })
-    .then((results) => {
-      const result = results[0];
-      res.location(`${req.originalUrl}/${result.id}`).status(201).json(result);
+    .then(results => {
+      if (results) {
+        //Hydrate the results
+        const hydrated = hydrateNotes(results)[0];
+        //Respond with a location header, a 201 status and a note object
+        res.location(`${req.originalUrl}/${hydrated.id}`).status(201).json(hydrated);
+      } else {
+        next();
+      }
     })
     .catch(err => {
       next(err);
-    });
-});
+    })
 
 /* ========== PUT/UPDATE A SINGLE ITEM ========== */
 router.put('/:id', (req, res, next) => {
   const noteId = req.params.id;
-  const { title, content, folderId } = req.body;
+  const { title, content, folderId, tags } = req.body;
 
   /***** Never trust users. Validate input *****/
   if (!title) {
