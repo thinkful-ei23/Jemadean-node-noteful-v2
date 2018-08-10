@@ -120,6 +120,7 @@ router.post('/', (req, res, next) => {
     .catch(err => {
       next(err);
     })
+});
 
 /* ========== PUT/UPDATE A SINGLE ITEM ========== */
 router.put('/:id', (req, res, next) => {
